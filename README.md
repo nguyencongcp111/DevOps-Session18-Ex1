@@ -1,19 +1,20 @@
 # StoreX
 
-Backend giả lập gồm hai service Spring Boot dùng chung một PostgreSQL, gửi log JSON qua TCP tới Logstash, rồi vào Elasticsearch và Kibana.
+Backend giả lập gồm ba service Spring Boot, gửi log JSON qua TCP tới Logstash, rồi vào Elasticsearch và Kibana.
 
 ```
-user-service  (8081, userdb)  --\
-                                 +--TCP:5000 (JSON)--> Logstash --> Elasticsearch --> Kibana (5601)
-order-service (8082, orderdb) --/
-   |
-   +-- REST --> user-service  (kiểm tra user trước khi tạo đơn)
+user-service    (8081, userdb)  --\
+order-service   (8082, orderdb) ---+--TCP:5000 (JSON)--> Logstash --> Elasticsearch --> Kibana (5601)
+payment-service (8083, không DB) -/
+   order-service --REST--> user-service     (kiểm tra user trước khi tạo đơn)
+   order-service --REST--> payment-service  (thanh toán đơn hàng)
 ```
 
 | Thành phần | Port trên host |
 |---|---|
 | user-service | 127.0.0.1:8081 |
 | order-service | 127.0.0.1:8082 |
+| payment-service | 127.0.0.1:8083 |
 | PostgreSQL | 127.0.0.1:5434 |
 | Logstash (tcp input) | 127.0.0.1:5000 |
 | Elasticsearch | 127.0.0.1:9200 |
@@ -21,11 +22,7 @@ order-service (8082, orderdb) --/
 
 ## Chạy
 
-Cần khoảng 3-4GB RAM trống cho cả stack. Nếu stack cũ (order-app, EFK) còn chạy thì tắt trước, vì trùng port 9200 và 5601:
-
 ```bash
-cd ~/3Nov26 && docker compose down      # stack cũ (không dùng -v để giữ dữ liệu)
-cd ~/storex
 docker compose up -d --build
 docker compose ps
 ```
@@ -33,42 +30,40 @@ docker compose ps
 ## Thử bằng curl
 
 ```bash
-# user-service (đã seed sẵn 2 user: id 1 và 2)
+# user-service (đã seed 2 user: id 1 và 2)
 curl -s localhost:8081/api/users
-curl -s -X POST localhost:8081/api/users -H 'Content-Type: application/json' \
-  -d '{"fullName":"Le Van C","email":"c@storex.local"}'
 
-# order-service (gọi sang user-service để kiểm tra user)
+# order-service: tạo đơn rồi thanh toán
 curl -s -X POST localhost:8082/api/orders -H 'Content-Type: application/json' \
   -d '{"userId":1,"productName":"Ban phim co","quantity":2,"amount":2400000}'
-curl -s localhost:8082/api/orders
+curl -s -X POST localhost:8082/api/orders/1/pay -H 'Content-Type: application/json' \
+  -d '{"method":"CARD"}'
 
-# Tạo log WARN: user không tồn tại (404)
-curl -s -X POST localhost:8082/api/orders -H 'Content-Type: application/json' \
-  -d '{"userId":999,"productName":"Chuot","quantity":1,"amount":350000}'
-
-# Tạo log ERROR có stack trace
-curl -s localhost:8082/api/debug/error
-docker compose stop user-service      # rồi tạo đơn: order-service báo 503 + log ERROR kèm stack trace
-docker compose start user-service
+# payment-service gọi trực tiếp
+curl -s -X POST localhost:8083/api/payments -H 'Content-Type: application/json' \
+  -d '{"orderId":1,"amount":2400000,"method":"CARD"}'
 ```
 
-## Gửi thử một dòng JSON thẳng vào Logstash
+Các tình huống thanh toán (dùng để tạo log các mức khác nhau):
+
+| Request | Kết quả | Log |
+|---|---|---|
+| `method: CARD`, `amount <= 50.000.000` | `APPROVED` | INFO |
+| `amount > 50.000.000` | `DECLINED` | WARN |
+| `method: FOO` (không hỗ trợ) | 400 | WARN |
+| `method: BROKEN_GATEWAY` | 502 | ERROR kèm stack trace |
+
+Log DEBUG của `com.storex.payment` nhiều và chi tiết (validate, fraud check, gọi gateway) nhưng mặc định không hiện vì payment-service chạy ở mức INFO.
+
+## Log và index
+
+`logstash/pipeline/logstash.conf` dùng `codec => json_lines` và tách index theo `app_name`:
+`user-service-YYYY.MM.dd`, `order-service-YYYY.MM.dd`, `payment-service-YYYY.MM.dd`.
 
 ```bash
-echo '{"message":"hello from nc","level":"INFO","app_name":"manual-test"}' | nc localhost 5000
 curl -s 'localhost:9200/_cat/indices?v'
 ```
 
-## Kiểm tra dữ liệu trong Elasticsearch
+## Actuator (payment-service)
 
-```bash
-curl -s 'localhost:9200/_search?size=1&pretty'
-```
-
-## Ghi chú
-
-- `logstash/pipeline/logstash.conf` hiện đang **cố tình sai** (xem bài tập): input `tcp` chưa khai báo codec.
-- Sau khi sửa `logstash.conf`: `docker compose restart logstash`.
-- Hai service gửi log bằng `LogstashTcpSocketAppender` (thư viện `logstash-logback-encoder`), mỗi dòng log là một JSON object kết thúc bằng ký tự xuống dòng. Mỗi dòng đã có sẵn `app_name` (`user-service` / `order-service`) và `env`.
-- Elasticsearch khóa index khi ổ đĩa đầy trên 95%. Kiểm tra `df -h /` nếu Logstash ghi không được.
+`payment-service` có Spring Boot Actuator. Cấu hình hiện chỉ expose `health,info` (xem `payment-service/src/main/resources/application.yml`).

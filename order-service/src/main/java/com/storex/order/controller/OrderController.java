@@ -1,6 +1,7 @@
 package com.storex.order.controller;
 
 import com.storex.order.dto.CreateOrderRequest;
+import com.storex.order.dto.PayOrderRequest;
 import com.storex.order.entity.StoreOrder;
 import com.storex.order.service.OrderService;
 import jakarta.validation.Valid;
@@ -23,6 +24,11 @@ public class OrderController {
     @ResponseStatus(HttpStatus.CREATED)
     public StoreOrder create(@Valid @RequestBody CreateOrderRequest request) {
         return orderService.createOrder(request);
+    }
+
+    @PostMapping("/{id}/pay")
+    public StoreOrder pay(@PathVariable Long id, @Valid @RequestBody PayOrderRequest request) {
+        return orderService.payOrder(id, request.method());
     }
 
     @GetMapping("/{id}")

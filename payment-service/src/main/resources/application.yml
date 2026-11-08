@@ -1,0 +1,20 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: payment-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,loggers
+
+storex:
+  env: ${APP_ENV:dev}
+  logstash:
+    destination: ${LOGSTASH_DESTINATION:localhost:5000}
+
+# Cố ý không đặt logging.level.com.storex: package com.storex.payment dùng mức root (INFO),
+# nên log DEBUG của payment-service không xuất hiện cho tới khi đổi level bằng Actuator.

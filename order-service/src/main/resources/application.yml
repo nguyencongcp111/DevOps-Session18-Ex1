@@ -17,6 +17,8 @@ storex:
   env: ${APP_ENV:dev}
   user-service:
     url: ${USER_SERVICE_URL:http://localhost:8081}
+  payment-service:
+    url: ${PAYMENT_SERVICE_URL:http://localhost:8083}
   logstash:
     destination: ${LOGSTASH_DESTINATION:localhost:5000}
 

@@ -51,16 +51,36 @@ services:
         condition: service_healthy
       user-service:
         condition: service_started
+      payment-service:
+        condition: service_started
       logstash:
         condition: service_started
     environment:
       DB_HOST: postgres
       DB_NAME: orderdb
       USER_SERVICE_URL: http://user-service:8081
+      PAYMENT_SERVICE_URL: http://payment-service:8083
       LOGSTASH_DESTINATION: logstash:5000
       JAVA_TOOL_OPTIONS: -Xmx200m
     ports:
       - "127.0.0.1:8082:8082"
+
+  payment-service:
+    build:
+      context: .
+      args:
+        SERVICE: payment-service
+    image: storex-payment-service
+    container_name: storex-payment-service
+    restart: unless-stopped
+    depends_on:
+      logstash:
+        condition: service_started
+    environment:
+      LOGSTASH_DESTINATION: logstash:5000
+      JAVA_TOOL_OPTIONS: -Xmx200m
+    ports:
+      - "127.0.0.1:8083:8083"
 
   logstash:
     image: docker.elastic.co/logstash/logstash:7.17.0

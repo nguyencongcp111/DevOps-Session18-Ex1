@@ -47,5 +47,6 @@ public class StoreOrder {
     public int getQuantity() { return quantity; }
     public BigDecimal getAmount() { return amount; }
     public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
     public Instant getCreatedAt() { return createdAt; }
 }

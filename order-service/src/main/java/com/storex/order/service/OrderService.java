@@ -1,7 +1,9 @@
 package com.storex.order.service;
 
+import com.storex.order.client.PaymentClient;
 import com.storex.order.client.UserClient;
 import com.storex.order.dto.CreateOrderRequest;
+import com.storex.order.dto.PaymentResponse;
 import com.storex.order.entity.StoreOrder;
 import com.storex.order.repository.StoreOrderRepository;
 import org.slf4j.Logger;
@@ -20,10 +22,12 @@ public class OrderService {
 
     private final StoreOrderRepository orderRepository;
     private final UserClient userClient;
+    private final PaymentClient paymentClient;
 
-    public OrderService(StoreOrderRepository orderRepository, UserClient userClient) {
+    public OrderService(StoreOrderRepository orderRepository, UserClient userClient, PaymentClient paymentClient) {
         this.orderRepository = orderRepository;
         this.userClient = userClient;
+        this.paymentClient = paymentClient;
     }
 
     public StoreOrder createOrder(CreateOrderRequest request) {
@@ -47,6 +51,29 @@ public class OrderService {
         StoreOrder saved = orderRepository.save(new StoreOrder(
                 request.userId(), request.productName(), request.quantity(), request.amount()));
         log.info("Order created id={} userId={} amount={}", saved.getId(), saved.getUserId(), saved.getAmount());
+        return saved;
+    }
+
+    public StoreOrder payOrder(Long id, String method) {
+        StoreOrder order = getOrder(id);
+        log.info("Paying order id={} amount={} method={}", id, order.getAmount(), method);
+
+        if ("PAID".equals(order.getStatus())) {
+            log.warn("Order already paid id={}", id);
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Order already paid: " + id);
+        }
+
+        PaymentResponse response;
+        try {
+            response = paymentClient.pay(order.getId(), order.getAmount(), method);
+        } catch (RestClientException e) {
+            log.error("Payment failed for orderId={}", id, e);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment service error");
+        }
+
+        order.setStatus("APPROVED".equals(response.status()) ? "PAID" : "PAYMENT_DECLINED");
+        StoreOrder saved = orderRepository.save(order);
+        log.info("Order payment result id={} status={} paymentId={}", saved.getId(), saved.getStatus(), response.paymentId());
         return saved;
     }
 
